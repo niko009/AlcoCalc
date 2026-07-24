@@ -25,6 +25,21 @@ export interface UserProfile {
   r: number;
 }
 
+export type FoodLevel = "empty" | "light" | "full";
+
+export interface SessionSettings {
+  foodLevel: FoodLevel;
+  eliminationRate: number;
+}
+
+export interface DrinkPreset {
+  id: string;
+  label: string;
+  type: DrinkType;
+  volumeMl: number;
+  abv: number;
+}
+
 export interface DrinkingSession {
   id: string;
   startTime: string;
@@ -38,6 +53,8 @@ export interface DrinkingSession {
 
 export interface AppStatePayload {
   profile: UserProfile;
+  sessionSettings: SessionSettings;
+  customPresets: DrinkPreset[];
   activeSessionId: string | null;
   currentDrinks: Drink[];
   history: DrinkingSession[];
