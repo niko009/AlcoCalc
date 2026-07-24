@@ -54,6 +54,12 @@ import {
   setLastCloudSync,
   shouldOfferCloudMigration,
 } from "../lib/local-state";
+import {
+  type DrinkInputErrors,
+  type ProfileInputErrors,
+  validateDrinkInput,
+  validateProfileInput,
+} from "../lib/validation";
 
 type Tab = "home" | "add" | "history" | "profile";
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -703,29 +709,34 @@ function AddDrink({
   onCancel: () => void;
 }) {
   const [type, setType] = useState<DrinkType>(initialDrink?.type ?? "Beer");
-  const [volumeMl, setVolume] = useState(initialDrink?.volumeMl ?? 500);
-  const [abv, setAbv] = useState(initialDrink?.abv ?? 5);
-  const [quantity, setQuantity] = useState(initialDrink?.quantity ?? 1);
+  const [volumeMl, setVolume] = useState(String(initialDrink?.volumeMl ?? 500));
+  const [abv, setAbv] = useState(String(initialDrink?.abv ?? 5));
+  const [quantity, setQuantity] = useState(String(initialDrink?.quantity ?? 1));
   const [presetRevision, setPresetRevision] = useState(0);
+  const [errors, setErrors] = useState<DrinkInputErrors>({});
   const [time, setTime] = useState(
     initialDrink ? localDateTimeValue(new Date(initialDrink.time)) : localDateTimeValue(),
   );
 
   const choosePreset = (preset: (typeof PRESETS)[number]) => {
     setType(preset.type);
-    setVolume(preset.volumeMl);
-    setAbv(preset.abv);
+    setVolume(String(preset.volumeMl));
+    setAbv(String(preset.abv));
+    setErrors((current) => ({ ...current, volumeMl: undefined, abv: undefined }));
     setPresetRevision((revision) => revision + 1);
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const nextErrors = validateDrinkInput({ volumeMl, abv, quantity, time });
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     onAdd({
       id: initialDrink?.id ?? createId(),
       type,
-      volumeMl,
-      abv,
-      quantity,
+      volumeMl: Number(volumeMl),
+      abv: Number(abv),
+      quantity: Number(quantity),
       time: new Date(time).toISOString(),
     });
   };
@@ -761,9 +772,9 @@ function AddDrink({
           ))}
         </div>
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          <NumberField key={`volume-${presetRevision}`} label="Объём, мл" value={volumeMl} min={1} max={5000} onChange={setVolume} />
-          <NumberField key={`abv-${presetRevision}`} label="Крепость, %" value={abv} min={0.1} max={96} step={0.1} onChange={setAbv} />
-          <NumberField key={`quantity-${presetRevision}`} label="Количество" value={quantity} min={1} max={100} onChange={setQuantity} />
+          <NumberField key={`volume-${presetRevision}`} label="Объём, мл" value={volumeMl} min={1} max={5000} error={errors.volumeMl} onChange={(value) => { setVolume(value); setErrors((current) => ({ ...current, volumeMl: undefined })); }} />
+          <NumberField key={`abv-${presetRevision}`} label="Крепость, %" value={abv} min={0.1} max={96} step={0.1} error={errors.abv} onChange={(value) => { setAbv(value); setErrors((current) => ({ ...current, abv: undefined })); }} />
+          <NumberField key={`quantity-${presetRevision}`} label="Количество" value={quantity} min={1} max={100} error={errors.quantity} onChange={(value) => { setQuantity(value); setErrors((current) => ({ ...current, quantity: undefined })); }} />
         </div>
         <div className="mt-5">
           <label className="text-xs font-bold text-slate-600">Время употребления</label>
@@ -771,9 +782,16 @@ function AddDrink({
             type="datetime-local"
             required
             value={time}
-            onChange={(event) => setTime(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-slate-900"
+            aria-invalid={Boolean(errors.time)}
+            onChange={(event) => {
+              setTime(event.target.value);
+              setErrors((current) => ({ ...current, time: undefined }));
+            }}
+            className={`mt-2 w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm outline-none ${
+              errors.time ? "border-red-400 focus:border-red-500" : "border-slate-200 focus:border-slate-900"
+            }`}
           />
+          {errors.time && <p className="mt-1.5 text-[11px] font-medium text-red-600">{errors.time}</p>}
           {lastDrink && (
             <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
               <Clock className="h-3.5 w-3.5" />
@@ -802,37 +820,34 @@ function NumberField({
   min,
   max,
   step = 1,
+  error,
   onChange,
 }: {
   label: string;
-  value: number;
+  value: string;
   min: number;
   max: number;
   step?: number;
-  onChange: (value: number) => void;
+  error?: string;
+  onChange: (value: string) => void;
 }) {
-  const [inputValue, setInputValue] = useState(() => String(value));
-
   return (
     <label className="text-xs font-bold text-slate-600">
       {label}
       <input
         type="number"
         required
-        value={inputValue}
+        value={value}
         min={min}
         max={max}
         step={step}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          setInputValue(nextValue);
-          if (nextValue !== "") {
-            const parsedValue = Number(nextValue);
-            onChange(parsedValue);
-          }
-        }}
-        className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-slate-900"
+        aria-invalid={Boolean(error)}
+        onChange={(event) => onChange(event.target.value)}
+        className={`mt-2 w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm outline-none ${
+          error ? "border-red-400 focus:border-red-500" : "border-slate-200 focus:border-slate-900"
+        }`}
       />
+      {error && <span className="mt-1.5 block text-[11px] font-medium text-red-600">{error}</span>}
     </label>
   );
 }
@@ -917,19 +932,36 @@ function ProfileView({
   user: { displayName: string; email: string } | null;
   onSave: (profile: UserProfile) => void;
 }) {
-  const [draft, setDraft] = useState(profile);
+  const [draft, setDraft] = useState({
+    weightKg: String(profile.weightKg),
+    heightCm: String(profile.heightCm),
+    age: String(profile.age),
+    r: String(profile.r),
+    gender: profile.gender,
+  });
   const [genderRevision, setGenderRevision] = useState(0);
+  const [errors, setErrors] = useState<ProfileInputErrors>({});
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSave(draft);
+    const nextErrors = validateProfileInput(draft);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+    onSave({
+      weightKg: Number(draft.weightKg),
+      heightCm: Number(draft.heightCm),
+      age: Number(draft.age),
+      r: Number(draft.r),
+      gender: draft.gender,
+    });
   };
   const gender = (value: UserProfile["gender"]) => {
     setGenderRevision((revision) => revision + 1);
     setDraft((current) => ({
       ...current,
       gender: value,
-      r: value === "Male" ? 0.68 : value === "Female" ? 0.55 : 0.61,
+      r: String(value === "Male" ? 0.68 : value === "Female" ? 0.55 : 0.61),
     }));
+    setErrors((current) => ({ ...current, r: undefined }));
   };
   return (
     <div>
@@ -955,12 +987,12 @@ function ProfileView({
             ))}
           </div>
           <div className="mt-5 grid grid-cols-3 gap-3">
-            <NumberField label="Вес, кг" value={draft.weightKg} min={20} max={300} onChange={(value) => setDraft({ ...draft, weightKg: value })} />
-            <NumberField label="Рост, см" value={draft.heightCm} min={50} max={250} onChange={(value) => setDraft({ ...draft, heightCm: value })} />
-            <NumberField label="Возраст" value={draft.age} min={18} max={120} onChange={(value) => setDraft({ ...draft, age: value })} />
+            <NumberField label="Вес, кг" value={draft.weightKg} min={20} max={300} step={0.1} error={errors.weightKg} onChange={(value) => { setDraft({ ...draft, weightKg: value }); setErrors((current) => ({ ...current, weightKg: undefined })); }} />
+            <NumberField label="Рост, см" value={draft.heightCm} min={50} max={250} step={0.1} error={errors.heightCm} onChange={(value) => { setDraft({ ...draft, heightCm: value }); setErrors((current) => ({ ...current, heightCm: undefined })); }} />
+            <NumberField label="Возраст" value={draft.age} min={18} max={120} error={errors.age} onChange={(value) => { setDraft({ ...draft, age: value }); setErrors((current) => ({ ...current, age: undefined })); }} />
           </div>
           <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-            <NumberField key={`widmark-${genderRevision}`} label="Коэффициент Видмарка (r)" value={draft.r} min={0.2} max={1.2} step={0.01} onChange={(value) => setDraft({ ...draft, r: value })} />
+            <NumberField key={`widmark-${genderRevision}`} label="Коэффициент Видмарка (r)" value={draft.r} min={0.2} max={1.2} step={0.01} error={errors.r} onChange={(value) => { setDraft({ ...draft, r: value }); setErrors((current) => ({ ...current, r: undefined })); }} />
           </div>
           <button className="action-primary mt-5">
             <Save className="h-4 w-4" /> Сохранить профиль
