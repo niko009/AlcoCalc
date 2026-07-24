@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,13 +16,26 @@ export const metadata: Metadata = {
   title: "AlcoCalc — личный журнал BAC",
   description:
     "Расчёт BAC по формуле Видмарка, активные сессии и облачная история.",
+  applicationName: "AlcoCalc",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "AlcoCalc",
+  },
   other: {
     "codex-preview": "development",
   },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
+    apple: "/pwa-icon.svg",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
