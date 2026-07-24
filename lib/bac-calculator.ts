@@ -1,8 +1,22 @@
-import type { Drink } from "./types";
+import type { Drink, FoodLevel, SessionSettings } from "./types";
 
 export const ETHANOL_DENSITY_G_PER_ML = 0.789;
 export const ELIMINATION_RATE_BAC_PER_HOUR = 0.015;
 export const DEFAULT_ABSORPTION_MINUTES = 45;
+export const DEFAULT_SESSION_SETTINGS: SessionSettings = {
+  foodLevel: "light",
+  eliminationRate: ELIMINATION_RATE_BAC_PER_HOUR,
+};
+
+const FOOD_ABSORPTION_MINUTES: Record<FoodLevel, number> = {
+  empty: 30,
+  light: 60,
+  full: 90,
+};
+
+export function getAbsorptionMinutes(foodLevel: FoodLevel) {
+  return FOOD_ABSORPTION_MINUTES[foodLevel];
+}
 
 export function calculateAlcoholGrams(volumeMl: number, abv: number): number {
   if (
@@ -93,6 +107,7 @@ export function calculateDynamicBAC(
   r: number,
   targetTime: Date,
   absorptionMinutes = DEFAULT_ABSORPTION_MINUTES,
+  eliminationRate = ELIMINATION_RATE_BAC_PER_HOUR,
 ): number {
   if (
     drinks.length === 0 ||
@@ -133,9 +148,13 @@ export function calculateDynamicBAC(
   let index = 0;
 
   const advance = (elapsedHours: number) => {
+    const safeEliminationRate =
+      Number.isFinite(eliminationRate) && eliminationRate > 0
+        ? eliminationRate
+        : ELIMINATION_RATE_BAC_PER_HOUR;
     const elimination =
-      bac > 0 || activeAbsorptionRate > ELIMINATION_RATE_BAC_PER_HOUR
-        ? ELIMINATION_RATE_BAC_PER_HOUR
+      bac > 0 || activeAbsorptionRate > safeEliminationRate
+        ? safeEliminationRate
         : 0;
     bac = Math.max(0, bac + (activeAbsorptionRate - elimination) * elapsedHours);
   };
@@ -158,11 +177,13 @@ export function calculateSobrietyTime(
   weightKg: number,
   r: number,
   fromTime = new Date(),
+  absorptionMinutes = DEFAULT_ABSORPTION_MINUTES,
+  eliminationRate = ELIMINATION_RATE_BAC_PER_HOUR,
 ): Date {
   if (drinks.length === 0) return new Date(fromTime);
   const times = drinks.map((drink) => Date.parse(drink.time)).filter(Number.isFinite);
   if (times.length === 0) return new Date(fromTime);
-  const absorptionEnd = Math.max(...times) + DEFAULT_ABSORPTION_MINUTES * 60_000;
+  const absorptionEnd = Math.max(...times) + absorptionMinutes * 60_000;
   const grams = drinks.reduce(
     (sum, drink) =>
       sum + calculateAlcoholGrams(drink.volumeMl, drink.abv) * drink.quantity,
@@ -171,7 +192,7 @@ export function calculateSobrietyTime(
   const peak = weightKg > 0 && r > 0 ? (grams / (weightKg * r * 1000)) * 100 : 0;
   const safeEnd =
     Math.max(fromTime.getTime(), absorptionEnd) +
-    (peak / ELIMINATION_RATE_BAC_PER_HOUR + 2) * 3_600_000;
+    (peak / Math.max(0.001, eliminationRate) + 2) * 3_600_000;
 
   for (
     let current = Math.max(fromTime.getTime(), Math.min(...times));
@@ -180,7 +201,14 @@ export function calculateSobrietyTime(
   ) {
     if (
       current >= absorptionEnd &&
-      calculateDynamicBAC(drinks, weightKg, r, new Date(current)) === 0
+      calculateDynamicBAC(
+        drinks,
+        weightKg,
+        r,
+        new Date(current),
+        absorptionMinutes,
+        eliminationRate,
+      ) === 0
     ) {
       return new Date(current);
     }
@@ -193,6 +221,7 @@ export function calculateForecast(
   weightKg: number,
   r: number,
   fromTime = new Date(),
+  settings = DEFAULT_SESSION_SETTINGS,
 ) {
   if (drinks.length === 0) {
     return {
@@ -202,7 +231,15 @@ export function calculateForecast(
     };
   }
 
-  const soberAt = calculateSobrietyTime(drinks, weightKg, r, fromTime);
+  const absorptionMinutes = getAbsorptionMinutes(settings.foodLevel);
+  const soberAt = calculateSobrietyTime(
+    drinks,
+    weightKg,
+    r,
+    fromTime,
+    absorptionMinutes,
+    settings.eliminationRate,
+  );
   let peakBac = 0;
   let peakTime = new Date(fromTime);
   let peakPassed = false;
@@ -213,7 +250,14 @@ export function calculateForecast(
     current <= soberAt.getTime();
     current += 60_000
   ) {
-    const bac = calculateDynamicBAC(drinks, weightKg, r, new Date(current));
+    const bac = calculateDynamicBAC(
+      drinks,
+      weightKg,
+      r,
+      new Date(current),
+      absorptionMinutes,
+      settings.eliminationRate,
+    );
     if (bac >= peakBac) {
       peakBac = bac;
       peakTime = new Date(current);
@@ -236,11 +280,20 @@ export function generateBACTimeline(
   weightKg: number,
   r: number,
   intervalMinutes = 15,
+  settings = DEFAULT_SESSION_SETTINGS,
 ): TimelinePoint[] {
   if (drinks.length === 0) return [];
   const times = drinks.map((drink) => Date.parse(drink.time));
   const first = Math.min(...times);
-  const end = calculateSobrietyTime(drinks, weightKg, r, new Date(first)).getTime();
+  const absorptionMinutes = getAbsorptionMinutes(settings.foodLevel);
+  const end = calculateSobrietyTime(
+    drinks,
+    weightKg,
+    r,
+    new Date(first),
+    absorptionMinutes,
+    settings.eliminationRate,
+  ).getTime();
   const points: TimelinePoint[] = [];
   for (
     let current = first, count = 0;
@@ -248,7 +301,14 @@ export function generateBACTimeline(
     current += intervalMinutes * 60_000, count += 1
   ) {
     const date = new Date(current);
-    const bac = calculateDynamicBAC(drinks, weightKg, r, date);
+    const bac = calculateDynamicBAC(
+      drinks,
+      weightKg,
+      r,
+      date,
+      absorptionMinutes,
+      settings.eliminationRate,
+    );
     points.push({
       time: date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
       bac: Number(bac.toFixed(4)),
@@ -262,16 +322,32 @@ export function calculateSessionStats(
   drinks: Drink[],
   weightKg: number,
   r: number,
+  settings = DEFAULT_SESSION_SETTINGS,
 ) {
   const times = drinks.map((drink) => Date.parse(drink.time));
   const startTime = new Date(Math.min(...times)).toISOString();
   const endTime = new Date(Math.max(...times)).toISOString();
-  const sobriety = calculateSobrietyTime(drinks, weightKg, r, new Date(startTime));
+  const absorptionMinutes = getAbsorptionMinutes(settings.foodLevel);
+  const sobriety = calculateSobrietyTime(
+    drinks,
+    weightKg,
+    r,
+    new Date(startTime),
+    absorptionMinutes,
+    settings.eliminationRate,
+  );
   let maxBac = 0;
   for (let time = Math.min(...times); time <= sobriety.getTime(); time += 5 * 60_000) {
     maxBac = Math.max(
       maxBac,
-      calculateDynamicBAC(drinks, weightKg, r, new Date(time)),
+      calculateDynamicBAC(
+        drinks,
+        weightKg,
+        r,
+        new Date(time),
+        absorptionMinutes,
+        settings.eliminationRate,
+      ),
     );
   }
   return {
@@ -290,5 +366,44 @@ export function calculateSessionStats(
         )
         .toFixed(2),
     ),
+  };
+}
+
+export function calculateBACRange(
+  drinks: Drink[],
+  weightKg: number,
+  r: number,
+  targetTime: Date,
+  settings = DEFAULT_SESSION_SETTINGS,
+) {
+  const nominalAbsorption = getAbsorptionMinutes(settings.foodLevel);
+  const low = calculateDynamicBAC(
+    drinks,
+    weightKg,
+    Math.min(1.2, r * 1.1),
+    targetTime,
+    Math.round(nominalAbsorption * 1.25),
+    Math.min(0.03, settings.eliminationRate + 0.005),
+  );
+  const estimate = calculateDynamicBAC(
+    drinks,
+    weightKg,
+    r,
+    targetTime,
+    nominalAbsorption,
+    settings.eliminationRate,
+  );
+  const high = calculateDynamicBAC(
+    drinks,
+    weightKg,
+    Math.max(0.2, r * 0.9),
+    targetTime,
+    Math.max(15, Math.round(nominalAbsorption * 0.75)),
+    Math.max(0.005, settings.eliminationRate - 0.005),
+  );
+  return {
+    low: Math.min(low, estimate, high),
+    estimate,
+    high: Math.max(low, estimate, high),
   };
 }
