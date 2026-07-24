@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_ABSORPTION_MINUTES,
   calculateAlcoholGrams,
+  calculateBACRange,
   calculateDynamicBAC,
   calculateForecast,
   calculateSobrietyTime,
@@ -17,6 +18,7 @@ import {
   isValidProfile,
   validateDrinkInput,
   validateProfileInput,
+  isValidDrinkPreset,
 } from "../lib/validation.ts";
 
 const baseTime = new Date("2026-07-24T12:00:00Z");
@@ -225,5 +227,56 @@ test("BAC math ignores non-finite and invalid quantities", () => {
       new Date(baseTime.getTime() + 3_600_000),
     ),
     0,
+  );
+});
+
+test("food and elimination settings change the BAC scenario", () => {
+  const after45Minutes = new Date(baseTime.getTime() + 45 * 60_000);
+  const emptyStomach = calculateDynamicBAC(
+    [vodka],
+    80,
+    0.68,
+    after45Minutes,
+    30,
+    0.015,
+  );
+  const fullStomach = calculateDynamicBAC(
+    [vodka],
+    80,
+    0.68,
+    after45Minutes,
+    90,
+    0.015,
+  );
+  assert.ok(emptyStomach > fullStomach);
+
+  const range = calculateBACRange([vodka], 80, 0.68, after45Minutes, {
+    foodLevel: "light",
+    eliminationRate: 0.015,
+  });
+  assert.ok(range.low <= range.estimate);
+  assert.ok(range.high >= range.estimate);
+});
+
+test("custom drink presets are validated", () => {
+  assert.equal(
+    isValidDrinkPreset({
+      id: "preset-1",
+      label: "Моё пиво",
+      type: "Beer",
+      volumeMl: 500,
+      abv: 5,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidDrinkPreset({
+      id: "preset-2",
+      label: "",
+      type: "Beer",
+      volumeMl: 500,
+      abv: 5,
+    }),
+    false,
   );
 });
