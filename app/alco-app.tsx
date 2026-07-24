@@ -20,6 +20,7 @@ import {
   Clock,
   Cloud,
   Download,
+  CopyPlus,
   GlassWater,
   History,
   Home,
@@ -27,6 +28,7 @@ import {
   Plus,
   Pencil,
   Save,
+  Star,
   ShieldAlert,
   Trash2,
   User,
@@ -34,17 +36,20 @@ import {
 import type {
   AppStatePayload,
   Drink,
+  DrinkPreset,
   DrinkType,
   DrinkingSession,
   UserProfile,
 } from "../lib/types";
 import {
   calculateAlcoholGrams,
+  calculateBACRange,
   calculateDynamicBAC,
   calculateForecast,
   calculatePermille,
   calculateSessionStats,
   generateBACTimeline,
+  getAbsorptionMinutes,
   getIntoxicationLevel,
 } from "../lib/bac-calculator";
 import {
@@ -72,6 +77,8 @@ type InstallPromptEvent = Event & {
 
 const DEFAULT_STATE: AppStatePayload = {
   profile: { weightKg: 75, heightCm: 175, age: 28, gender: "Male", r: 0.68 },
+  sessionSettings: { foodLevel: "light", eliminationRate: 0.015 },
+  customPresets: [],
   activeSessionId: null,
   currentDrinks: [],
   history: [],
@@ -363,6 +370,19 @@ export default function AlcoApp({
           <AddDrink
             initialDrink={editingDrink}
             lastDrink={state.currentDrinks.at(-1)}
+            customPresets={state.customPresets}
+            onSavePreset={(preset) =>
+              setState((current) => ({
+                ...current,
+                customPresets: [...current.customPresets, preset],
+              }))
+            }
+            onDeletePreset={(id) =>
+              setState((current) => ({
+                ...current,
+                customPresets: current.customPresets.filter((item) => item.id !== id),
+              }))
+            }
             onCancel={() => {
               setEditingDrink(null);
               setTab("home");
@@ -464,7 +484,15 @@ function Dashboard({
   onEdit: (drink: Drink) => void;
 }) {
   const { profile, currentDrinks } = state;
-  const bac = calculateDynamicBAC(currentDrinks, profile.weightKg, profile.r, now);
+  const absorptionMinutes = getAbsorptionMinutes(state.sessionSettings.foodLevel);
+  const bac = calculateDynamicBAC(
+    currentDrinks,
+    profile.weightKg,
+    profile.r,
+    now,
+    absorptionMinutes,
+    state.sessionSettings.eliminationRate,
+  );
   const permille = calculatePermille(bac);
   const level = getIntoxicationLevel(bac);
   const forecast = calculateForecast(
@@ -472,16 +500,29 @@ function Dashboard({
     profile.weightKg,
     profile.r,
     now,
+    state.sessionSettings,
   );
   const remainingMinutes = Math.max(
     0,
     Math.ceil((forecast.nearZeroTime.getTime() - now.getTime()) / 60_000),
   );
-  const bacRangeLow = bac * 0.8;
-  const bacRangeHigh = bac * 1.25;
+  const bacRange = calculateBACRange(
+    currentDrinks,
+    profile.weightKg,
+    profile.r,
+    now,
+    state.sessionSettings,
+  );
   const timeline = useMemo(
-    () => generateBACTimeline(currentDrinks, profile.weightKg, profile.r),
-    [currentDrinks, profile.weightKg, profile.r],
+    () =>
+      generateBACTimeline(
+        currentDrinks,
+        profile.weightKg,
+        profile.r,
+        15,
+        state.sessionSettings,
+      ),
+    [currentDrinks, profile.weightKg, profile.r, state.sessionSettings],
   );
   const totalGrams = currentDrinks.reduce(
     (sum, drink) =>
@@ -494,7 +535,12 @@ function Dashboard({
 
   const complete = () => {
     if (!currentDrinks.length) return;
-    const stats = calculateSessionStats(currentDrinks, profile.weightKg, profile.r);
+    const stats = calculateSessionStats(
+      currentDrinks,
+      profile.weightKg,
+      profile.r,
+      state.sessionSettings,
+    );
     const session: DrinkingSession = {
       id: state.activeSessionId ?? createId(),
       ...stats,
@@ -580,8 +626,8 @@ function Dashboard({
             <div className="mt-3 grid grid-cols-2 gap-3">
               <Metric
                 label="Диапазон оценки BAC"
-                value={`${bacRangeLow.toFixed(3)}–${bacRangeHigh.toFixed(3)}%`}
-                detail="Условный диапазон ±20–25%, не измерение"
+                value={`${bacRange.low.toFixed(3)}–${bacRange.high.toFixed(3)}%`}
+                detail="Сценарии поглощения и выведения, не измерение"
               />
               <Metric
                 label="Прогноз пика"
@@ -596,6 +642,52 @@ function Dashboard({
               Важно
             </p>
             <p className="mt-1 text-xs leading-5 text-slate-600">{level.effects}</p>
+          </div>
+          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 sm:grid-cols-2">
+            <label className="text-xs font-bold text-slate-600">
+              Приём пищи
+              <select
+                value={state.sessionSettings.foodLevel}
+                onChange={(event) =>
+                  setState((current) => ({
+                    ...current,
+                    sessionSettings: {
+                      ...current.sessionSettings,
+                      foodLevel: event.target.value as AppStatePayload["sessionSettings"]["foodLevel"],
+                    },
+                  }))
+                }
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+              >
+                <option value="empty">Натощак · около 30 мин</option>
+                <option value="light">Лёгкая еда · около 60 мин</option>
+                <option value="full">Плотная еда · около 90 мин</option>
+              </select>
+            </label>
+            <label className="text-xs font-bold text-slate-600">
+              Скорость выведения
+              <select
+                value={state.sessionSettings.eliminationRate}
+                onChange={(event) =>
+                  setState((current) => ({
+                    ...current,
+                    sessionSettings: {
+                      ...current.sessionSettings,
+                      eliminationRate: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+              >
+                <option value={0.01}>Медленная · 0.010%/ч</option>
+                <option value={0.015}>Средняя · 0.015%/ч</option>
+                <option value={0.02}>Быстрая · 0.020%/ч</option>
+              </select>
+            </label>
+            <p className="text-[11px] leading-5 text-slate-500 sm:col-span-2">
+              Эти параметры уточняют сценарий, но не измеряют реальный BAC. Рост и возраст
+              сохраняются в профиле, однако напрямую в формулу Видмарка не входят.
+            </p>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             <button onClick={onAdd} className="action-primary">
@@ -738,11 +830,17 @@ function DrinkRow({
 function AddDrink({
   initialDrink,
   lastDrink,
+  customPresets,
+  onSavePreset,
+  onDeletePreset,
   onAdd,
   onCancel,
 }: {
   initialDrink: Drink | null;
   lastDrink?: Drink;
+  customPresets: DrinkPreset[];
+  onSavePreset: (preset: DrinkPreset) => void;
+  onDeletePreset: (id: string) => void;
   onAdd: (drink: Drink) => void;
   onCancel: () => void;
 }) {
@@ -752,11 +850,12 @@ function AddDrink({
   const [quantity, setQuantity] = useState(String(initialDrink?.quantity ?? 1));
   const [presetRevision, setPresetRevision] = useState(0);
   const [errors, setErrors] = useState<DrinkInputErrors>({});
+  const [presetName, setPresetName] = useState("");
   const [time, setTime] = useState(
     initialDrink ? localDateTimeValue(new Date(initialDrink.time)) : localDateTimeValue(),
   );
 
-  const choosePreset = (preset: (typeof PRESETS)[number]) => {
+  const choosePreset = (preset: Pick<DrinkPreset, "type" | "volumeMl" | "abv">) => {
     setType(preset.type);
     setVolume(String(preset.volumeMl));
     setAbv(String(preset.abv));
@@ -790,6 +889,27 @@ function AddDrink({
         </p>
       </div>
       <form onSubmit={submit} className="mt-6 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+        {lastDrink && !initialDrink && (
+          <button
+            type="button"
+            onClick={() =>
+              onAdd({
+                ...lastDrink,
+                id: createId(),
+                time: new Date().toISOString(),
+              })
+            }
+            className="mb-5 flex w-full items-center justify-between rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left"
+          >
+            <span>
+              <strong className="block text-sm text-amber-950">Повторить последний</strong>
+              <span className="text-xs text-amber-700">
+                {lastDrink.volumeMl} мл · {lastDrink.abv}% · сейчас
+              </span>
+            </span>
+            <CopyPlus className="h-5 w-5 text-amber-700" />
+          </button>
+        )}
         <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
           Быстрый выбор
         </label>
@@ -809,6 +929,37 @@ function AddDrink({
             </button>
           ))}
         </div>
+        {customPresets.length > 0 && (
+          <div className="mt-5">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Мои напитки
+            </label>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {customPresets.map((preset) => (
+                <span
+                  key={preset.id}
+                  className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white"
+                >
+                  <button
+                    type="button"
+                    onClick={() => choosePreset(preset)}
+                    className="px-3 py-2 text-xs font-semibold text-slate-700"
+                  >
+                    {preset.label} · {preset.volumeMl} мл · {preset.abv}%
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Удалить пресет ${preset.label}`}
+                    onClick={() => onDeletePreset(preset.id)}
+                    className="border-l border-slate-200 px-2 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           <NumberField key={`volume-${presetRevision}`} label="Объём, мл" value={volumeMl} min={1} max={5000} error={errors.volumeMl} onChange={(value) => { setVolume(value); setErrors((current) => ({ ...current, volumeMl: undefined })); }} />
           <NumberField key={`abv-${presetRevision}`} label="Крепость, %" value={abv} min={0.1} max={96} step={0.1} error={errors.abv} onChange={(value) => { setAbv(value); setErrors((current) => ({ ...current, abv: undefined })); }} />
@@ -838,6 +989,45 @@ function AddDrink({
             </p>
           )}
         </div>
+        {!initialDrink && (
+          <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <label className="text-xs font-bold text-slate-600">
+              Сохранить текущие параметры в «Мои напитки»
+            </label>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={presetName}
+                maxLength={50}
+                placeholder="Например, моё пиво"
+                onChange={(event) => setPresetName(event.target.value)}
+                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+              <button
+                type="button"
+                disabled={
+                  !presetName.trim() ||
+                  !Number.isFinite(Number(volumeMl)) ||
+                  !Number.isFinite(Number(abv))
+                }
+                onClick={() => {
+                  const name = presetName.trim();
+                  if (!name) return;
+                  onSavePreset({
+                    id: createId(),
+                    label: name,
+                    type,
+                    volumeMl: Number(volumeMl),
+                    abv: Number(abv),
+                  });
+                  setPresetName("");
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-2.5 text-xs font-bold text-slate-700 shadow-sm disabled:opacity-40"
+              >
+                <Star className="h-4 w-4" /> Сохранить
+              </button>
+            </div>
+          </div>
+        )}
         <div className="mt-6 flex gap-2 border-t border-slate-100 pt-5">
           <button className="action-primary">
             {initialDrink ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
