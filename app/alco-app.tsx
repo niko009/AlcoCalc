@@ -19,6 +19,7 @@ import {
   ChevronUp,
   Clock,
   Cloud,
+  Download,
   GlassWater,
   History,
   Home,
@@ -63,6 +64,11 @@ import {
 
 type Tab = "home" | "add" | "history" | "profile";
 type SaveState = "idle" | "saving" | "saved" | "error";
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 
 const DEFAULT_STATE: AppStatePayload = {
   profile: { weightKg: 75, heightCm: 175, age: 28, gender: "Male", r: 0.68 },
@@ -119,6 +125,8 @@ export default function AlcoApp({
     useState<AppStatePayload | null>(null);
   const [showMigration, setShowMigration] = useState(false);
   const [editingDrink, setEditingDrink] = useState<Drink | null>(null);
+  const [installPrompt, setInstallPrompt] =
+    useState<InstallPromptEvent | null>(null);
   const [now, setNow] = useState(() => new Date());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstPersist = useRef(true);
@@ -127,6 +135,19 @@ export default function AlcoApp({
     const timer = setInterval(() => setNow(new Date()), 15_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator && !demo) {
+      void navigator.serviceWorker.register("/sw.js");
+    }
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", captureInstallPrompt);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", captureInstallPrompt);
+  }, [demo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +294,22 @@ export default function AlcoApp({
             ))}
           </nav>
 
+          <div className="flex items-center gap-2">
+          {installPrompt && (
+            <button
+              type="button"
+              onClick={() => {
+                void installPrompt.prompt().then(async () => {
+                  await installPrompt.userChoice;
+                  setInstallPrompt(null);
+                });
+              }}
+              className="hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 sm:inline-flex"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Установить
+            </button>
+          )}
           {user ? (
             <div className="flex items-center gap-2 text-right">
               <div className="hidden sm:block">
@@ -304,6 +341,7 @@ export default function AlcoApp({
               <ArrowRight className="h-3.5 w-3.5" />
             </a>
           )}
+          </div>
         </div>
       </header>
 
