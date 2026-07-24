@@ -1,0 +1,6 @@
+{
+  "name": "BAC Calculator",
+  "description": "Приложение для расчета приблизительного уровня алкоголя в крови (BAC), времени вытрезвления и ведения истории напитков.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
