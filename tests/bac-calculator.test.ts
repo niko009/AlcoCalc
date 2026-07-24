@@ -10,6 +10,12 @@ import {
 } from "../lib/bac-calculator.ts";
 import type { Drink } from "../lib/types.ts";
 import {
+  calculateHistoryAnalytics,
+  filterSessionsByPeriod,
+  historyToCsv,
+  toStandardDrinks,
+} from "../lib/analytics.ts";
+import {
   mergeAppStates,
   shouldOfferCloudMigration,
 } from "../lib/local-state.ts";
@@ -279,4 +285,43 @@ test("custom drink presets are validated", () => {
     }),
     false,
   );
+});
+
+test("history analytics calculate periods, standard drinks and alcohol-free days", () => {
+  const session = {
+    id: "analytics-session",
+    startTime: "2026-07-20T18:00:00Z",
+    endTime: "2026-07-20T20:00:00Z",
+    maxBac: 0.08,
+    durationHours: 2,
+    totalAlcoholGrams: 20,
+    drinks: [vodka],
+    isCompleted: true,
+  };
+  const now = new Date("2026-07-24T12:00:00Z");
+  assert.equal(toStandardDrinks(20), 2);
+  assert.equal(filterSessionsByPeriod([session], "7d", now).length, 1);
+  const analytics = calculateHistoryAnalytics([session], now);
+  assert.equal(analytics.sessions7d, 1);
+  assert.equal(analytics.standardDrinks30d, 2);
+  assert.equal(analytics.alcoholFreeDays30d, 29);
+  assert.equal(analytics.maxBac30d, 0.08);
+});
+
+test("CSV export includes session and drink values", () => {
+  const csv = historyToCsv([
+    {
+      id: "csv-session",
+      startTime: vodka.time,
+      endTime: vodka.time,
+      maxBac: 0.04,
+      durationHours: 0,
+      totalAlcoholGrams: 15.78,
+      drinks: [vodka],
+      isCompleted: true,
+    },
+  ]);
+  assert.match(csv, /session_id/);
+  assert.match(csv, /csv-session/);
+  assert.match(csv, /Vodka/);
 });
