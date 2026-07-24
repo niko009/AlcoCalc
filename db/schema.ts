@@ -17,7 +17,21 @@ export const profiles = sqliteTable("profiles", {
   age: real("age").notNull(),
   gender: text("gender").notNull(),
   widmarkFactor: real("widmark_factor").notNull(),
+  foodLevel: text("food_level").notNull().default("light"),
+  eliminationRate: real("elimination_rate").notNull().default(0.015),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const drinkPresets = sqliteTable("drink_presets", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email")
+    .notNull()
+    .references(() => users.email, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  type: text("type").notNull(),
+  volumeMl: real("volume_ml").notNull(),
+  abv: real("abv").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const drinkingSessions = sqliteTable("drinking_sessions", {
