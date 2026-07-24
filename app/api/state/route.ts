@@ -6,6 +6,11 @@ import type {
   DrinkingSession,
   UserProfile,
 } from "../../../lib/types";
+import {
+  isFiniteInRange,
+  isValidDrink,
+  isValidProfile,
+} from "../../../lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -52,40 +57,43 @@ function asDrink(row: DrinkRow): Drink {
   };
 }
 
-function isFiniteInRange(value: unknown, min: number, max: number) {
-  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-}
-
 function validateState(payload: unknown): payload is AppStatePayload {
   if (!payload || typeof payload !== "object") return false;
   const state = payload as Partial<AppStatePayload>;
-  const profile = state.profile;
+  if (!isValidProfile(state.profile)) return false;
   if (
-    !profile ||
-    !isFiniteInRange(profile.weightKg, 20, 300) ||
-    !isFiniteInRange(profile.heightCm, 50, 250) ||
-    !isFiniteInRange(profile.age, 18, 120) ||
-    !isFiniteInRange(profile.r, 0.2, 1.2) ||
-    !["Male", "Female", "Other"].includes(profile.gender)
-  ) {
-    return false;
-  }
+    state.activeSessionId !== null &&
+    (typeof state.activeSessionId !== "string" ||
+      state.activeSessionId.length === 0 ||
+      state.activeSessionId.length > 100)
+  ) return false;
   if (!Array.isArray(state.currentDrinks) || state.currentDrinks.length > 500) return false;
   if (!Array.isArray(state.history) || state.history.length > 1000) return false;
+  if (
+    !state.history.every(
+      (session) =>
+        session &&
+        typeof session.id === "string" &&
+        session.id.length > 0 &&
+        session.id.length <= 100 &&
+        typeof session.startTime === "string" &&
+        Number.isFinite(Date.parse(session.startTime)) &&
+        typeof session.endTime === "string" &&
+        Number.isFinite(Date.parse(session.endTime)) &&
+        Date.parse(session.endTime) >= Date.parse(session.startTime) &&
+        isFiniteInRange(session.maxBac, 0, 10) &&
+        isFiniteInRange(session.durationHours, 0, 24 * 31) &&
+        isFiniteInRange(session.totalAlcoholGrams, 0, 1_000_000) &&
+        session.isCompleted === true &&
+        Array.isArray(session.drinks) &&
+        session.drinks.length <= 500,
+    )
+  ) return false;
   const drinks = [
     ...state.currentDrinks,
     ...state.history.flatMap((session) => session.drinks ?? []),
   ];
-  return drinks.every(
-    (drink) =>
-      typeof drink.id === "string" &&
-      drink.id.length <= 100 &&
-      typeof drink.time === "string" &&
-      Number.isFinite(Date.parse(drink.time)) &&
-      isFiniteInRange(drink.volumeMl, 1, 5000) &&
-      isFiniteInRange(drink.abv, 0.1, 96) &&
-      isFiniteInRange(drink.quantity, 1, 100),
-  );
+  return drinks.every(isValidDrink);
 }
 
 export async function GET() {

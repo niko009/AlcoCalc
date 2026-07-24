@@ -5,7 +5,14 @@ export const ELIMINATION_RATE_BAC_PER_HOUR = 0.015;
 export const DEFAULT_ABSORPTION_MINUTES = 45;
 
 export function calculateAlcoholGrams(volumeMl: number, abv: number): number {
-  if (volumeMl <= 0 || abv <= 0) return 0;
+  if (
+    !Number.isFinite(volumeMl) ||
+    !Number.isFinite(abv) ||
+    volumeMl <= 0 ||
+    abv <= 0
+  ) {
+    return 0;
+  }
   return volumeMl * (abv / 100) * ETHANOL_DENSITY_G_PER_ML;
 }
 
@@ -87,7 +94,15 @@ export function calculateDynamicBAC(
   targetTime: Date,
   absorptionMinutes = DEFAULT_ABSORPTION_MINUTES,
 ): number {
-  if (drinks.length === 0 || weightKg <= 0 || r <= 0) return 0;
+  if (
+    drinks.length === 0 ||
+    !Number.isFinite(weightKg) ||
+    !Number.isFinite(r) ||
+    weightKg <= 0 ||
+    r <= 0
+  ) {
+    return 0;
+  }
   const targetMs = targetTime.getTime();
   if (!Number.isFinite(targetMs)) return 0;
 
@@ -97,6 +112,7 @@ export function calculateDynamicBAC(
   for (const drink of drinks) {
     const startMs = new Date(drink.time).getTime();
     if (!Number.isFinite(startMs) || startMs > targetMs) continue;
+    if (!Number.isFinite(drink.quantity) || drink.quantity <= 0) continue;
     const grams = calculateAlcoholGrams(drink.volumeMl, drink.abv) * drink.quantity;
     if (grams <= 0) continue;
     const peakBac = (grams / (weightKg * r * 1000)) * 100;

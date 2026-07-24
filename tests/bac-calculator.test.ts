@@ -12,6 +12,12 @@ import {
   mergeAppStates,
   shouldOfferCloudMigration,
 } from "../lib/local-state.ts";
+import {
+  isValidDrink,
+  isValidProfile,
+  validateDrinkInput,
+  validateProfileInput,
+} from "../lib/validation.ts";
 
 const baseTime = new Date("2026-07-24T12:00:00Z");
 const vodka: Drink = {
@@ -143,5 +149,81 @@ test("migration is offered on first sign-in and after anonymous changes only", (
       "2026-07-24T10:00:00Z",
     ),
     true,
+  );
+});
+
+test("drink form rejects empty, fractional quantity and future time", () => {
+  const now = new Date("2026-07-24T12:00:00Z");
+  const empty = validateDrinkInput(
+    { volumeMl: "", abv: "", quantity: "", time: "" },
+    now,
+  );
+  assert.ok(empty.volumeMl);
+  assert.ok(empty.abv);
+  assert.ok(empty.quantity);
+  assert.ok(empty.time);
+
+  const invalid = validateDrinkInput(
+    {
+      volumeMl: "500",
+      abv: "5",
+      quantity: "1.5",
+      time: "2026-07-24T12:06",
+    },
+    now,
+  );
+  assert.equal(invalid.quantity, "Количество должно быть целым числом.");
+  assert.ok(invalid.time);
+});
+
+test("profile form validates ranges and integer age", () => {
+  const invalid = validateProfileInput({
+    weightKg: "19",
+    heightCm: "251",
+    age: "30.5",
+    r: "1.3",
+  });
+  assert.ok(invalid.weightKg);
+  assert.ok(invalid.heightCm);
+  assert.equal(invalid.age, "Возраст должен быть целым числом.");
+  assert.ok(invalid.r);
+});
+
+test("stored profile and drink validators reject corrupted numeric data", () => {
+  assert.equal(isValidDrink(vodka), true);
+  assert.equal(isValidDrink({ ...vodka, quantity: Number.NaN }), false);
+  assert.equal(isValidDrink({ ...vodka, type: "Unknown" }), false);
+  assert.equal(
+    isValidProfile({
+      weightKg: 80,
+      heightCm: 180,
+      age: 35,
+      gender: "Male",
+      r: 0.68,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidProfile({
+      weightKg: Number.POSITIVE_INFINITY,
+      heightCm: 180,
+      age: 35,
+      gender: "Male",
+      r: 0.68,
+    }),
+    false,
+  );
+});
+
+test("BAC math ignores non-finite and invalid quantities", () => {
+  assert.equal(calculateAlcoholGrams(Number.NaN, 5), 0);
+  assert.equal(
+    calculateDynamicBAC(
+      [{ ...vodka, quantity: Number.POSITIVE_INFINITY }],
+      80,
+      0.68,
+      new Date(baseTime.getTime() + 3_600_000),
+    ),
+    0,
   );
 });
