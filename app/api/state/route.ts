@@ -3,13 +3,16 @@ import { getD1 } from "../../../db";
 import type {
   AppStatePayload,
   Drink,
+  DrinkPreset,
   DrinkingSession,
   UserProfile,
 } from "../../../lib/types";
 import {
   isFiniteInRange,
   isValidDrink,
+  isValidDrinkPreset,
   isValidProfile,
+  isValidSessionSettings,
 } from "../../../lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +23,10 @@ const DEFAULT_PROFILE: UserProfile = {
   age: 28,
   gender: "Male",
   r: 0.68,
+};
+const DEFAULT_SESSION_SETTINGS = {
+  foodLevel: "light" as const,
+  eliminationRate: 0.015,
 };
 
 type SessionRow = {
@@ -42,6 +49,14 @@ type DrinkRow = {
   consumed_at: string;
 };
 
+type PresetRow = {
+  id: string;
+  label: string;
+  type: DrinkPreset["type"];
+  volume_ml: number;
+  abv: number;
+};
+
 function unauthorized() {
   return Response.json({ error: "Sign in with ChatGPT is required." }, { status: 401 });
 }
@@ -61,6 +76,12 @@ function validateState(payload: unknown): payload is AppStatePayload {
   if (!payload || typeof payload !== "object") return false;
   const state = payload as Partial<AppStatePayload>;
   if (!isValidProfile(state.profile)) return false;
+  if (!isValidSessionSettings(state.sessionSettings)) return false;
+  if (
+    !Array.isArray(state.customPresets) ||
+    state.customPresets.length > 50 ||
+    !state.customPresets.every(isValidDrinkPreset)
+  ) return false;
   if (
     state.activeSessionId !== null &&
     (typeof state.activeSessionId !== "string" ||
@@ -114,7 +135,8 @@ export async function GET() {
 
   const profileRow = await d1
     .prepare(
-      `SELECT weight_kg, height_cm, age, gender, widmark_factor
+      `SELECT weight_kg, height_cm, age, gender, widmark_factor,
+              food_level, elimination_rate
        FROM profiles WHERE user_email = ?`,
     )
     .bind(user.email)
@@ -124,6 +146,8 @@ export async function GET() {
       age: number;
       gender: UserProfile["gender"];
       widmark_factor: number;
+      food_level: AppStatePayload["sessionSettings"]["foodLevel"];
+      elimination_rate: number;
     }>();
 
   const sessionResult = await d1
@@ -146,6 +170,16 @@ export async function GET() {
     )
     .bind(user.email)
     .all<DrinkRow>();
+
+  const presetResult = await d1
+    .prepare(
+      `SELECT id, label, type, volume_ml, abv
+       FROM drink_presets
+       WHERE user_email = ?
+       ORDER BY created_at ASC`,
+    )
+    .bind(user.email)
+    .all<PresetRow>();
 
   const drinksBySession = new Map<string, Drink[]>();
   for (const row of drinkResult.results) {
@@ -178,6 +212,19 @@ export async function GET() {
           r: profileRow.widmark_factor,
         }
       : DEFAULT_PROFILE,
+    sessionSettings: profileRow
+      ? {
+          foodLevel: profileRow.food_level,
+          eliminationRate: profileRow.elimination_rate,
+        }
+      : DEFAULT_SESSION_SETTINGS,
+    customPresets: presetResult.results.map((row) => ({
+      id: row.id,
+      label: row.label,
+      type: row.type,
+      volumeMl: row.volume_ml,
+      abv: row.abv,
+    })),
     activeSessionId: active?.id ?? null,
     currentDrinks: active ? drinksBySession.get(active.id) ?? [] : [],
     history,
@@ -209,14 +256,17 @@ export async function PUT(request: Request) {
     d1
       .prepare(
         `INSERT INTO profiles
-          (user_email, weight_kg, height_cm, age, gender, widmark_factor, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          (user_email, weight_kg, height_cm, age, gender, widmark_factor,
+           food_level, elimination_rate, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(user_email) DO UPDATE SET
            weight_kg = excluded.weight_kg,
            height_cm = excluded.height_cm,
            age = excluded.age,
            gender = excluded.gender,
            widmark_factor = excluded.widmark_factor,
+           food_level = excluded.food_level,
+           elimination_rate = excluded.elimination_rate,
            updated_at = CURRENT_TIMESTAMP`,
       )
       .bind(
@@ -226,7 +276,10 @@ export async function PUT(request: Request) {
         payload.profile.age,
         payload.profile.gender,
         payload.profile.r,
+        payload.sessionSettings.foodLevel,
+        payload.sessionSettings.eliminationRate,
       ),
+    d1.prepare("DELETE FROM drink_presets WHERE user_email = ?").bind(user.email),
     d1
       .prepare(
         `DELETE FROM drinks
@@ -237,6 +290,25 @@ export async function PUT(request: Request) {
       .bind(user.email),
     d1.prepare("DELETE FROM drinking_sessions WHERE user_email = ?").bind(user.email),
   ];
+
+  for (const preset of payload.customPresets) {
+    statements.push(
+      d1
+        .prepare(
+          `INSERT INTO drink_presets
+            (id, user_email, label, type, volume_ml, abv)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          preset.id,
+          user.email,
+          preset.label,
+          preset.type,
+          preset.volumeMl,
+          preset.abv,
+        ),
+    );
+  }
 
   const sessions: Array<{
     session: DrinkingSession;
