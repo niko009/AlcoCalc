@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #1e293b;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+.action-primary,
+.action-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.75rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: 150ms ease;
+}
+
+.action-primary {
+  background: #0f172a;
+  color: white;
+}
+
+.action-primary:hover {
+  background: #1e293b;
+}
+
+.action-secondary {
+  border: 1px solid #e2e8f0;
+  background: white;
+  color: #475569;
+}
+
+.action-secondary:hover {
+  background: #f8fafc;
+}
+
+@media (max-width: 420px) {
+  .action-primary,
+  .action-secondary {
+    flex: 1;
+  }
+}
