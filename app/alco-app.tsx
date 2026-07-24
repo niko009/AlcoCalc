@@ -53,6 +53,13 @@ import {
   getIntoxicationLevel,
 } from "../lib/bac-calculator";
 import {
+  calculateHistoryAnalytics,
+  filterSessionsByPeriod,
+  historyToCsv,
+  type HistoryPeriod,
+  toStandardDrinks,
+} from "../lib/analytics";
+import {
   getLastCloudSync,
   loadLocalState,
   mergeAppStates,
@@ -405,7 +412,7 @@ export default function AlcoApp({
         )}
         {tab === "history" && (
           <HistoryView
-            history={state.history}
+            state={state}
             onDelete={(id) =>
               setState((current) => ({
                 ...current,
@@ -619,7 +626,7 @@ function Dashboard({
             <Metric
               label="Чистого алкоголя"
               value={`${totalGrams.toFixed(1)} г`}
-              detail={`${currentDrinks.reduce((sum, drink) => sum + drink.volumeMl * drink.quantity, 0)} мл напитков`}
+              detail={`${toStandardDrinks(totalGrams).toFixed(1)} стандартных порций по 10 г`}
             />
           </div>
           {currentDrinks.length > 0 && (
@@ -1081,25 +1088,131 @@ function NumberField({
 }
 
 function HistoryView({
-  history,
+  state,
   onDelete,
 }: {
-  history: DrinkingSession[];
+  state: AppStatePayload;
   onDelete: (id: string) => void;
 }) {
+  const { history } = state;
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [period, setPeriod] = useState<HistoryPeriod>("all");
+  const [query, setQuery] = useState("");
+  const analytics = useMemo(() => calculateHistoryAnalytics(history), [history]);
+  const visibleHistory = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
+    return filterSessionsByPeriod(history, period).filter((session) => {
+      if (!normalizedQuery) return true;
+      const date = new Date(session.startTime).toLocaleDateString("ru-RU");
+      return (
+        date.includes(normalizedQuery) ||
+        session.drinks.some((drink) =>
+          drink.type.toLocaleLowerCase("ru-RU").includes(normalizedQuery),
+        )
+      );
+    });
+  }, [history, period, query]);
+
+  const download = (format: "json" | "csv") => {
+    const content =
+      format === "json"
+        ? JSON.stringify(
+            {
+              exportedAt: new Date().toISOString(),
+              standardDrinkGrams: 10,
+              state,
+            },
+            null,
+            2,
+          )
+        : historyToCsv(history);
+    const blob = new Blob([content], {
+      type:
+        format === "json"
+          ? "application/json;charset=utf-8"
+          : "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `alcocalc-${new Date().toISOString().slice(0, 10)}.${format}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
-      <h1 className="text-3xl font-black tracking-tight">История сессий</h1>
-      <p className="mt-2 text-sm text-slate-500">Ваши завершённые сессии хранятся в Sites.</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight">История и аналитика</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Стандартная порция в этой статистике — 10 г чистого алкоголя.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => download("csv")} className="action-secondary">
+            <Download className="h-4 w-4" /> CSV
+          </button>
+          <button type="button" onClick={() => download("json")} className="action-secondary">
+            <Download className="h-4 w-4" /> JSON
+          </button>
+        </div>
+      </div>
+      <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric
+          label="За 7 дней"
+          value={`${toStandardDrinks(analytics.grams7d).toFixed(1)} порц.`}
+          detail={`${analytics.sessions7d} сессий · ${analytics.grams7d.toFixed(1)} г`}
+        />
+        <Metric
+          label="За 30 дней"
+          value={`${analytics.standardDrinks30d.toFixed(1)} порц.`}
+          detail={`${analytics.sessions30d} сессий · ${analytics.grams30d.toFixed(1)} г`}
+        />
+        <Metric
+          label="Дней без алкоголя"
+          value={`${analytics.alcoholFreeDays30d} из 30`}
+          detail="По сохранённым сессиям"
+        />
+        <Metric
+          label="Максимальный пик"
+          value={`${(analytics.maxBac30d * 10).toFixed(2)} ‰`}
+          detail={
+            analytics.changePercent === null
+              ? "Нет данных за прошлый период"
+              : `${analytics.changePercent >= 0 ? "+" : ""}${analytics.changePercent.toFixed(0)}% алкоголя к прошлым 30 дням`
+          }
+        />
+      </section>
+      <div className="mt-5 grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 sm:grid-cols-[1fr_auto]">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Поиск по типу напитка или дате"
+          className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-slate-900"
+        />
+        <select
+          value={period}
+          onChange={(event) => setPeriod(event.target.value as HistoryPeriod)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm"
+        >
+          <option value="all">Всё время</option>
+          <option value="7d">Последние 7 дней</option>
+          <option value="30d">Последние 30 дней</option>
+        </select>
+      </div>
       {history.length === 0 ? (
         <div className="mt-8 rounded-3xl border border-dashed border-slate-200 bg-white p-12 text-center">
           <History className="mx-auto h-10 w-10 text-slate-300" />
           <p className="mt-3 text-sm text-slate-500">История пока пуста.</p>
         </div>
+      ) : visibleHistory.length === 0 ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+          По выбранному периоду и запросу сессий не найдено.
+        </div>
       ) : (
         <div className="mt-6 space-y-3">
-          {history.map((session) => {
+          {visibleHistory.map((session) => {
             const open = expanded === session.id;
             return (
               <article key={session.id} className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
@@ -1118,7 +1231,8 @@ function HistoryView({
                       })}
                     </p>
                     <p className="mt-1 text-[11px] text-slate-400">
-                      {session.drinks.length} записей · {session.totalAlcoholGrams} г спирта
+                      {session.drinks.length} записей · {session.totalAlcoholGrams} г ·{" "}
+                      {toStandardDrinks(session.totalAlcoholGrams).toFixed(1)} стандартных порций
                     </p>
                   </div>
                   <div className="flex items-center gap-4">
