@@ -1,4 +1,10 @@
-import type { Drink, DrinkType, UserProfile } from "./types";
+import type {
+  Drink,
+  DrinkPreset,
+  DrinkType,
+  SessionSettings,
+  UserProfile,
+} from "./types";
 
 export const MAX_FUTURE_DRINK_MINUTES = 5;
 
@@ -131,5 +137,33 @@ export function isValidProfile(profile: unknown): profile is UserProfile {
     Number.isInteger(candidate.age) &&
     isFiniteInRange(candidate.r, 0.2, 1.2) &&
     ["Male", "Female", "Other"].includes(candidate.gender ?? "")
+  );
+}
+
+export function isValidSessionSettings(
+  settings: unknown,
+): settings is SessionSettings {
+  if (!settings || typeof settings !== "object") return false;
+  const candidate = settings as Partial<SessionSettings>;
+  return (
+    ["empty", "light", "full"].includes(candidate.foodLevel ?? "") &&
+    isFiniteInRange(candidate.eliminationRate, 0.01, 0.02)
+  );
+}
+
+export function isValidDrinkPreset(preset: unknown): preset is DrinkPreset {
+  if (!preset || typeof preset !== "object") return false;
+  const candidate = preset as Partial<DrinkPreset>;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.length > 0 &&
+    candidate.id.length <= 100 &&
+    typeof candidate.label === "string" &&
+    candidate.label.trim().length > 0 &&
+    candidate.label.length <= 50 &&
+    typeof candidate.type === "string" &&
+    DRINK_TYPES.has(candidate.type as DrinkType) &&
+    isFiniteInRange(candidate.volumeMl, 1, 5000) &&
+    isFiniteInRange(candidate.abv, 0.1, 96)
   );
 }
