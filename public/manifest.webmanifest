@@ -1,0 +1,22 @@
+{
+  "name": "AlcoCalc — калькулятор BAC",
+  "short_name": "AlcoCalc",
+  "description": "Локальный журнал напитков и ориентировочный расчёт BAC.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "lang": "ru",
+  "categories": ["health", "lifestyle", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
