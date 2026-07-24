@@ -1,4 +1,9 @@
-import type { AppStatePayload, Drink, DrinkingSession } from "./types";
+import type { AppStatePayload, Drink, DrinkPreset, DrinkingSession } from "./types";
+
+const DEFAULT_SESSION_SETTINGS = {
+  foodLevel: "light" as const,
+  eliminationRate: 0.015,
+};
 
 export const LOCAL_STATE_KEY = "alcocalc.local-state.v2";
 const SYNC_KEY_PREFIX = "alcocalc.last-cloud-sync.";
@@ -12,6 +17,7 @@ export function hasMeaningfulData(state: AppStatePayload) {
   return (
     state.currentDrinks.length > 0 ||
     state.history.length > 0 ||
+    (state.customPresets?.length ?? 0) > 0 ||
     state.profile.weightKg !== 75 ||
     state.profile.heightCm !== 175 ||
     state.profile.age !== 28 ||
@@ -74,8 +80,25 @@ export function mergeAppStates(
   }
 
   const currentDrinks = mergeDrinks(local.currentDrinks, cloud.currentDrinks);
+  const presetsById = new Map<string, DrinkPreset>();
+  for (const preset of [
+    ...(local.customPresets ?? []),
+    ...(cloud.customPresets ?? []),
+  ]) {
+    const duplicate = [...presetsById.values()].some(
+      (item) =>
+        item.label.trim().toLowerCase() === preset.label.trim().toLowerCase() &&
+        item.volumeMl === preset.volumeMl &&
+        item.abv === preset.abv,
+    );
+    if (!presetsById.has(preset.id) && !duplicate) presetsById.set(preset.id, preset);
+  }
   return {
     profile: hasMeaningfulData(local) ? local.profile : cloud.profile,
+    sessionSettings: hasMeaningfulData(local)
+      ? local.sessionSettings ?? DEFAULT_SESSION_SETTINGS
+      : cloud.sessionSettings ?? DEFAULT_SESSION_SETTINGS,
+    customPresets: [...presetsById.values()],
     activeSessionId:
       currentDrinks.length > 0
         ? local.activeSessionId ?? cloud.activeSessionId ?? cryptoSafeId()
@@ -98,7 +121,20 @@ export function loadLocalState(fallback: AppStatePayload): StoredLocalState {
     if (!parsed?.state?.profile || !Array.isArray(parsed.state.history)) {
       return { state: fallback, updatedAt: new Date(0).toISOString() };
     }
-    return parsed;
+    return {
+      ...parsed,
+      state: {
+        ...fallback,
+        ...parsed.state,
+        sessionSettings: {
+          ...DEFAULT_SESSION_SETTINGS,
+          ...parsed.state.sessionSettings,
+        },
+        customPresets: Array.isArray(parsed.state.customPresets)
+          ? parsed.state.customPresets
+          : [],
+      },
+    };
   } catch {
     return { state: fallback, updatedAt: new Date(0).toISOString() };
   }
