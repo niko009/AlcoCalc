@@ -8,6 +8,13 @@
       "when": 1784886000368,
       "tag": "0000_condemned_piledriver",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784899048002,
+      "tag": "0001_many_loners",
+      "breakpoints": true
     }
   ]
 }
