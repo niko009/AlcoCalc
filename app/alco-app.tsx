@@ -763,6 +763,22 @@ function Dashboard({
               <DrinkRow
                 key={drink.id}
                 drink={drink}
+                onRepeat={() =>
+                  setState((current) => {
+                    const repeated = {
+                      ...drink,
+                      id: createId(),
+                      time: new Date().toISOString(),
+                    };
+                    return {
+                      ...current,
+                      activeSessionId: current.activeSessionId ?? createId(),
+                      currentDrinks: [...current.currentDrinks, repeated].sort(
+                        (a, b) => Date.parse(a.time) - Date.parse(b.time),
+                      ),
+                    };
+                  })
+                }
                 onEdit={() => onEdit(drink)}
                 onDelete={() =>
                   setState((current) => ({
@@ -795,10 +811,12 @@ function DrinkRow({
   drink,
   onDelete,
   onEdit,
+  onRepeat,
 }: {
   drink: Drink;
   onDelete?: () => void;
   onEdit?: () => void;
+  onRepeat?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 p-4">
@@ -815,6 +833,16 @@ function DrinkRow({
         </div>
       </div>
       <div className="flex items-center">
+        {onRepeat && (
+          <button
+            onClick={onRepeat}
+            aria-label="Повторить напиток сейчас"
+            className="mr-1 inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] font-bold text-amber-700 hover:bg-amber-100"
+          >
+            <CopyPlus className="h-3.5 w-3.5" />
+            <span>Повторить</span>
+          </button>
+        )}
         {onEdit && (
           <button
             onClick={onEdit}
